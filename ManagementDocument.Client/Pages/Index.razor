@@ -1,0 +1,107 @@
+﻿<!-- Авторизационная форма -->
+@page "/"
+
+@using ManagementDocument.Client.Handlers;
+@using ManagementDocument.Client.Models;
+@using ManagementDocument.Database.Entities;
+@using Refit;
+
+@inject IAuthData AuthData
+@inject IJSRuntime JsRuntime
+@inject NavigationManager Navigation
+
+<PageTitle>Authorization</PageTitle>
+
+<h3>Авторизация</h3>
+
+<!--Логин-->
+<div class="form-group">
+    <label for="loginInput">Логин:</label>
+    <input type="text" id="loginInput" @bind="@_login" class="form-control" />
+    <!--Если есть ошибка в поле "Логин"-->
+    @if (!string.IsNullOrWhiteSpace(_loginError))
+    {
+        <span style="color: red;">@_loginError</span>
+    }
+</div>
+
+<!--Пароль-->
+<div class="form-group">
+    <label for="passwordInput">Пароль:</label>
+    <input type="password" id="passwordInput" @bind="@_password" class="form-control" />
+    <!--Если есть ошибка в поле "Пароль"-->
+    @if (!string.IsNullOrWhiteSpace(_passwordError))
+    {
+        <span style="color: red;">@_passwordError</span>
+    }
+</div>
+
+<!--Кнопка авторизации-->
+<button class="btn btn-primary" @onclick="SignIn">Войти</button>
+
+
+
+@code {
+    #region Fields
+    private string? _login;
+    private string? _password;
+
+    private string _loginError = "";
+    private string _passwordError = "";
+    #endregion Fields
+
+    #region Commands
+    /// <summary>
+    /// Обработчик события нажатия кнопки "Войти".
+    /// </summary>
+    private async Task SignIn()
+    {
+        // Очистка полей с ошибками
+        _loginError = _passwordError = "";
+
+        try
+        {
+            // Авторизация пользователя
+            await AuthUser(new User { Login = _login, Password = _password });
+
+            // Переход на страницу управления документами
+            NavigateToManagement();
+        }
+        catch (ValidationApiException ex)
+        {
+            // Список ошибок
+            var errors = ex.Content is not null ? ex.Content.Errors : new();
+
+            // Распределение ошибок по свойствам
+            foreach (var item in errors.Keys)
+            {
+                switch (item)
+                {
+                    case "Login":
+                        _loginError = errors[item].First();
+                        break;
+                    case "Password":
+                        _passwordError = errors[item].First();
+                        break;
+                    default:
+                        await JsRuntime.InvokeVoidAsync("alert", ex);
+                        break;
+                }
+            }
+        }
+        catch (Exception ex) { await JsRuntime.InvokeVoidAsync("alert", ex); }
+    }
+
+    private async Task AuthUser(User user)
+    {
+        // Авторизация пользователя
+        string token = await AuthData.Auth(user);
+
+        // Сохранение токена
+        TokenStorage.Token = token;
+    }
+
+    private void NavigateToManagement() => Navigation.NavigateTo("/management");
+    #endregion Commands
+}
+

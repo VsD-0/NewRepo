@@ -1,0 +1,366 @@
+﻿<!-- Форма управления документами -->
+@page "/management"
+
+@using System.Collections.ObjectModel;
+@using FluentValidation;
+@using ManagementDocument.Client.Models;
+@using ManagementDocument.Database.Entities;
+@using ManagementDocument.Domain.Models;
+@using Newtonsoft.Json;
+@using Newtonsoft.Json.Linq;
+@using Refit;
+@using System.Net;
+@using System.IdentityModel.Tokens.Jwt;
+
+@inject IJSRuntime JsRuntime
+
+@inject IDocumentData DocumentData
+
+<PageTitle>Management documents</PageTitle>
+
+<!--Если список документов отсутствует-->
+@if (data.Items is not null)
+{
+    #region Management
+    <!--Если пользователь НЕ является администратором-->
+    @if (_role == "2")
+    {
+        <h3>Управление документами</h3>
+
+        <!--Тип документа-->
+        <div class="form-group">
+            <label for="doctype">Тип документа:</label>
+            <input type="text" class="form-control" @bind="SelectedDocument.Doctype" />
+            <!--Если есть ошибка в поле "Тип документа"-->
+            @if (!string.IsNullOrEmpty(_docTypeError))
+            {
+                <span style="color: red;">@_docTypeError</span>
+            }
+        </div>
+
+        <!--Номер документа-->
+        <div class="form-group">
+            <label for="num">Номер документа:</label>
+            <input type="text" class="form-control" @bind="SelectedDocument.Num" />
+            <!--Если есть ошибка в поле "Номер документа"-->
+            @if (!string.IsNullOrEmpty(_numError))
+            {
+                <span style="color: red;">@_numError</span>
+            }
+        </div>
+
+        <!--Код организации-->
+        <div class="form-group">
+            <label for="codeorg">Код организации:</label>
+            <input type="text" class="form-control" @bind="SelectedDocument.Codeorg" />
+            <!--Если есть ошибка в поле "Код организации"-->
+            @if (!string.IsNullOrEmpty(_codeOrgError))
+            {
+                <span style="color: red;">@_codeOrgError</span>
+            }
+        </div>
+
+        <!--Организация-->
+        <div class="form-group">
+            <label for="org">Организация:</label>
+            <input type="text" class="form-control" @bind="SelectedDocument.Org">
+            <!--Если есть ошибка в поле "Организация"-->
+            @if (!string.IsNullOrEmpty(_orgError))
+            {
+                <span style="color: red;">@_orgError</span>
+            }
+        </div>
+
+        <!--Дата получения документа-->
+        <div class="form-group">
+            <label for="date">Дата:</label>
+            <input type="text" class="form-control" @bind="SelectedDocument.Date" />
+            <!--Если есть ошибка в поле "Дата"-->
+            @if (!string.IsNullOrEmpty(_dateError))
+            {
+                <span style="color: red;">@_dateError</span>
+            }
+        </div>
+
+        <!--Дата рождения-->
+        <div class="form-group">
+            <label for="birthdate">Дата рождения:</label>
+            <input type="text" class="form-control" @bind="SelectedDocument.Birthdate" />
+            <!--Если есть ошибка в поле "Дата рождения"-->
+            @if (!string.IsNullOrEmpty(_birthDateError))
+            {
+                <span style="color: red;">@_birthDateError</span>
+            }
+        </div>
+
+        <!--Кнопка содания нового документа-->
+        <button class="btn btn-primary" @onclick="@(e => CreateDocument())">CreateDocument</button>
+        
+        <!--Кнопка обновления существующего документа-->
+        <button class="btn btn-primary" @onclick="@(e => UpdateDocument())">UpdateDocument</button>
+        
+        <!--Кнопка очистки полей-->
+        <button class="btn btn-primary" @onclick="@(e => Clear())">Clear</button>
+    }
+
+    <!--Фильтр по типу документа-->
+    <div class="form-group">
+        <label for="documentType">Тип документа:</label>
+        <select class="form-control" @bind="SelectedDocumentTypeIndex" @bind:after="GetDocuments">
+            <option value="-1">Все</option>
+            <option value="1">Паспорт гражданина РФ</option>
+            <option value="2">Загранпаспорт гражданина РФ</option>
+            <option value="3">Военный билет</option>
+        </select>
+    </div>
+
+    <hr />
+    #endregion Management
+
+    #region Documents
+    <!--Таблица документов-->
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Doctype</th>
+                <th>Num</th>
+                <th>Codeorg</th>
+                <th>Org</th>
+                <th>Date</th>
+                <th>Birthdate</th>
+                @if (_role == "2")
+                {
+                    <th></th>
+                    <th></th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            <!--Заполнение таблицы-->
+            @foreach (var item in data.Items)
+            {
+                <tr>
+                    <td>@item.Id</td>
+                    <td>@item.Doctype</td>
+                    <td>@item.Num</td>
+                    <td>@item.Codeorg</td>
+                    <td>@item.Org</td>
+                    <td>@item.Date</td>
+                    <td>@item.Birthdate</td>
+                    @if (_role == "2")
+                    {
+                        <!--Кнопка удаления документа-->
+                        <td><button class="btn btn-danger" @onclick="@(e => DeleteDocument(item))">Delete</button></td>
+                        <!--Кнопка выделения документа-->
+                        <td><button class="btn btn-warning" @onclick="@(e => Selected(item))">Select</button></td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+    #endregion Documents
+
+    #region Pagination
+    <!--Кнопка назад-->
+    <button class="btn, btn-outline-dark" @onclick="@(e => Previous())">Previous</button>
+    <!--Страницы-->
+    @for (int i = 1; i <= data.Pagination?.TotalPages; i++)
+    {
+        int page = i;
+        <button class="btn, btn-outline-dark" @onclick="@(e => ChangePage(page))">@i</button>
+    }
+    <!--Кнопка вперёд-->
+    <button class="btn, btn-outline-dark" @onclick="@(e => Next())">Next</button>
+    #endregion Pagination
+}
+else
+{
+    <!--Если пользователь не авторизовался-->
+    @if (TokenStorage.Token is null)
+    {
+        <p><em>Требуется авторизация</em></p>
+    }
+    else
+    {
+        <!--Заглушка на время загрузки документов-->
+        <p><em>Loading...</em></p>
+    }
+}
+
+
+
+@code {
+    #region Fields
+    // Выбранный документ
+    private Document SelectedDocument = new();
+
+    // Документы
+    private PaginatedResult<Document> data = new();
+
+    // Роль пользователя
+    private string _role = "1";
+
+    // Фильтр - выбранный тип документа
+    private int SelectedDocumentTypeIndex = -1;
+
+    // Валидационные ошибки
+    private string _docTypeError = "";
+    private string _numError = "";
+    private string _codeOrgError = "";
+    private string _orgError = "";
+    private string _dateError = "";
+    private string _birthDateError = "";
+
+    // Сортировка
+    private string _sortParam = "";
+    #endregion Fields
+
+    #region Commands
+    /// <summary>
+    /// Инициализирует компонент и получает список документов при загрузке страницы.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        if (TokenStorage.Token is not null)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+
+            // Получение токена
+            var jwtToken = tokenHandler.ReadJwtToken(TokenStorage.Token);
+
+            // Получение роли из токена
+            var roleClaim = jwtToken.Claims.FirstOrDefault(claim => claim.Type == "role");
+            _role = roleClaim is not null ? roleClaim.Value : "1";
+
+            // Получение списка
+            await GetDocuments();
+        }
+    }
+
+    #region Management
+    /// <summary>
+    /// Удаляет документ из базы данных и обновляет список документов.
+    /// </summary>
+    /// <param name="document">Документ для удаления.</param>
+    private async Task DeleteDocument(Document document)
+    {
+        // Удаление документа в базе данных
+        await DocumentData.DeleteDocument(document.Id);
+        // Обновление списка
+        await GetDocuments();
+    }
+
+    /// <summary>
+    /// Обновляет документ в базе данных и обновляет список документов.
+    /// </summary>
+    private async Task UpdateDocument()
+    {
+        // Обновление документа в базе данных
+        await DocumentData.UpdateDocument(SelectedDocument);
+        // Обновление списка
+        await GetDocuments();
+    }
+
+    /// <summary>
+    /// Создает новый документ в базе данных и обновляет список документов.
+    /// </summary>
+    private async Task CreateDocument()
+    {
+        _docTypeError = _numError = _codeOrgError = _orgError = _dateError = _birthDateError = "";
+
+        try
+        {
+            // Создание документа в базе данных
+            var a = await DocumentData.CreateDocument(SelectedDocument);
+        }
+        catch (ValidationApiException ex)
+        {
+            // Список ошибок
+            var errors = ex.Content is not null ? ex.Content.Errors : new();
+
+            // Распределение ошибок по свойствам
+            foreach (var item in errors.Keys)
+            {
+                switch (item)
+                {
+                    case "DocType":
+                        _docTypeError = errors[item].First();
+                        break;
+                    case "Num":
+                        _numError = errors[item].First();
+                        break;
+                    case "CodeOrg":
+                        _codeOrgError = errors[item].First();
+                        break;
+                    case "Org":
+                        _orgError = errors[item].First();
+                        break;
+                    case "Date":
+                        _dateError = errors[item].First();
+                        break;
+                    case "BirthDate":
+                        _birthDateError = errors[item].First();
+                        break;
+                    default:
+                        await JsRuntime.InvokeVoidAsync("alert", ex);
+                        break;
+                }
+            }
+        }
+        catch (Exception ex) { await JsRuntime.InvokeVoidAsync("alert", ex); }
+
+        // Обновление списка
+        await GetDocuments();
+    }
+    #endregion Management
+
+    #region Pagination
+    /// <summary>
+    /// Получает список документов с учетом параметров поиска и пагинации.
+    /// </summary>
+    private async Task<PaginatedResult<Document>> GetDocuments() => data = await DocumentData.GetSearchedDocuments(SelectedDocumentTypeIndex, "noparam", "null", 1, 5);
+
+    /// <summary>
+    /// Загружает предыдущую страницу результатов списка документов.
+    /// </summary>
+    private async Task Previous() => data = data.Pagination?.CurrentPage > 1 ? await DocumentData.GetSearchedDocuments(SelectedDocumentTypeIndex, "noparam", "null", --data.Pagination.CurrentPage, 5) : data;
+
+    /// <summary>
+    /// Загружает следующую страницу результатов списка документов.
+    /// </summary>
+    private async Task Next() => data = data.Pagination?.CurrentPage < data.Pagination?.TotalPages ? await DocumentData.GetSearchedDocuments(SelectedDocumentTypeIndex, "noparam", "null", ++data.Pagination.CurrentPage, 5) : data;
+
+    /// <summary>
+    /// Загружает указанную страницу результатов списка документов.
+    /// </summary>
+    private async Task ChangePage(int numPage) => data = await DocumentData.GetSearchedDocuments(SelectedDocumentTypeIndex, "noparam", "null", numPage, 5);
+    #endregion Pagination
+
+    /// <summary>
+    /// Выбирает документ для редактирования.
+    /// </summary>
+    /// <param name="document">Выбранный документ.</param>
+    private void Selected(Document document)
+    {
+        SelectedDocument = new Document
+        {
+            Doctype = document.Doctype,
+            Num = document.Num,
+            Codeorg = document.Codeorg,
+            Org = document.Org,
+            Date = document.Date,
+            Birthdate = document.Birthdate
+        };
+    }
+
+    /// <summary>
+    /// Очищает поля ввода и сбрасывает ошибки валидации.
+    /// </summary>
+    private void Clear()
+    {
+        _docTypeError = _numError = _codeOrgError = _orgError = _dateError = _birthDateError = "";
+        SelectedDocument = new();
+    }
+    #endregion Commands
+}

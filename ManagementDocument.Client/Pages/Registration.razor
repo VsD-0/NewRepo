@@ -1,0 +1,108 @@
+﻿<!-- Форма регистрации -->
+@page "/registration"
+
+@using ManagementDocument.Client.Handlers;
+@using ManagementDocument.Client.Models;
+@using ManagementDocument.Database.Entities;
+@using Refit;
+
+@inject IAuthData AuthData
+@inject IRegistrationData RegistrationData
+@inject NavigationManager Navigation
+
+<PageTitle>Registration</PageTitle>
+
+<h3>Регистрация</h3>
+
+<!--Логин-->
+<div class="form-group">
+    <label for="loginInput">Логин:</label>
+    <input type="text" id="loginInput" @bind="@_login" class="form-control" />
+    <!--Если есть ошибка в поле "Логин"-->
+    @if (!string.IsNullOrWhiteSpace(_loginError))
+    {
+        <span style="color: red;">@_loginError</span>
+    }
+</div>
+
+<!--Пароль-->
+<div class="form-group">
+    <label for="passwordInput">Пароль:</label>
+    <input type="password" id="passwordInput" @bind="@_password" class="form-control" />
+    <!--Если есть ошибка в поле "Пароль"-->
+    @if (!string.IsNullOrWhiteSpace(_passwordError))
+    {
+        <span style="color: red;">@_passwordError</span>
+    }
+</div>
+
+<!--Кнопка регистрации-->
+<button class="btn btn-primary" @onclick="SignUp">Зарегистрироваться</button>
+
+@code {
+    #region Fields
+    private string? _login;
+    private string? _password;
+
+    private string _loginError { get; set; } = "";
+    private string _passwordError { get; set; } = "";
+    #endregion Fields
+
+    #region Commands
+    /// <summary>
+    /// Обработчик события нажатия кнопки "Зарегистрироваться".
+    /// </summary>
+    private async Task SignUp()
+    {
+        // Очистка полей с ошибками
+        _loginError = _passwordError = "";
+
+        try
+        {
+            // Регистрация пользователя
+            User user = await RegistrationData.CreateUser(new User { Login = _login, Password = _password });
+
+            // Авторизация пользователя
+            await AuthNewUser(user);
+
+            // Переход на страницу управления документами
+            NavigateToManagement();
+        }
+        catch (ValidationApiException ex)
+        {
+            // Список ошибок
+            var errors = ex.Content is not null ? ex.Content.Errors : new();
+
+            // Распределение ошибок по свойствам
+            foreach (var item in errors.Keys)
+            {
+                switch (item)
+                {
+                    case "Login":
+                        _loginError = errors[item].First();
+                        break;
+                    case "Password":
+                        _passwordError = errors[item].First();
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Авторизует пользователя и сохраняют токен.
+    /// </summary>
+    /// <param name="user">Пользователь для авторизации.</param>
+    private async Task AuthNewUser(User user)
+    {
+        string token = await AuthData.Auth(user);
+
+        TokenStorage.Token = token;
+    }
+
+    /// <summary>
+    /// Переход на страницу управления документами.
+    /// </summary>
+    private void NavigateToManagement() => Navigation.NavigateTo("/management");
+    #endregion Commands
+}

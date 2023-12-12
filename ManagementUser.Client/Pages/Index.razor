@@ -1,0 +1,248 @@
+﻿@page "/"
+
+@using ManagementDocument.Database.Entities;
+@using ManagementDocument.Domain.Models;
+@using ManagementUser.Client.Interfaces;
+@using Refit;
+
+@inject IUserData UserData
+@inject IJSRuntime JsRuntime
+
+<PageTitle>Management Users</PageTitle>
+
+@if (data.Items is not null)
+{
+    <h1>Управление пользователями</h1>
+
+    <!--Логин пользователя-->
+    <div class="form-group">
+        <label for="doctype">Логин пользователя:</label>
+        <input type="text" class="form-control" @bind="SelectedUser.Login"/>
+        <!--Если есть ошибка в поле "Логин пользователя"-->
+        @if (!string.IsNullOrEmpty(_loginError))
+        {
+            <span style="color: red;">@_loginError</span>
+        }
+    </div>
+
+    <!--Роль пользователя-->
+    <div class="form-group">
+        <label for="num">Роль пользователя:</label>
+        <input type="text" class="form-control" @bind="SelectedUser.Role" />
+        <!--Если есть ошибка в поле "Роль пользователя"-->
+        @if (!string.IsNullOrEmpty(_roleError))
+        {
+            <span style="color: red;">@_roleError</span>
+        }
+    </div>
+
+    <!--Пароль пользователя-->
+    <div class="form-group">
+        <label for="codeorg">Пароль пользователя:</label>
+        <input type="text" class="form-control" @bind="SelectedUser.Password" />
+        <!--Если есть ошибка в поле "Пароль пользователя"-->
+        @if (!string.IsNullOrEmpty(_passwordError))
+        {
+            <span style="color: red;">@_passwordError</span>
+        }
+    </div>
+
+    <!--Кнопка содания нового пользователя-->
+    <button class="btn btn-primary" @onclick="@(e => CreateUser())">Создать нового пользователя</button>
+
+    <!--Кнопка обновления существующего пользователя-->
+    <button class="btn btn-primary" @onclick="@(e => UpdateUser())">Обновить данные пользователя</button>
+
+    <p>Примечание: при обновлении, пароль пользователя обновлён НЕ будет!</p>
+
+    <hr />
+
+    <div class="form-group">
+        <label for="documentType">Тип документа:</label>
+        <select class="form-control" @bind="SelectedUserRoleIndex" @bind:after="GetUsers">
+            <option value="-1">Все</option>
+            <option value="1">Обычный пользователь</option>
+            <option value="2">Администратор</option>
+        </select>
+    </div>
+
+    <!--Таблица пользователей-->
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Login</th>
+                <th>Role</th>
+                <th></th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            <!--Заполнение таблицы-->
+            @foreach (var item in data.Items)
+            {
+                <tr>
+                    <td>@item.Id</td>
+                    <td>@item.Login</td>
+                    <td>@item.Role</td>
+                    <!--Кнопка удаления документа-->
+                    <td><button class="btn btn-danger" @onclick="@(e => DeleteUser(item))">Delete</button></td>
+                    <!--Кнопка выделения документа-->
+                    <td><button class="btn btn-warning" @onclick="@(e => Selected(new User {Id = item.Id, Login = item.Login, Password = "", Role = item.Role}))">Select</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    #region Pagination
+    <!--Кнопка назад-->
+    <button class="btn, btn-outline-dark" @onclick="@(e => Previous())">Previous</button>
+    <!--Страницы-->
+    @for (int i = 1; i <= data.Pagination?.TotalPages; i++)
+    {
+        int page = i;
+        <button class="btn, btn-outline-dark" @onclick="@(e => ChangePage(page))">@i</button>
+    }
+    <!--Кнопка вперёд-->
+    <button class="btn, btn-outline-dark" @onclick="@(e => Next())">Next</button>
+    #endregion Pagination
+}
+else
+{
+    <!--Заглушка на время загрузки документов-->
+    <p><em>Загрузка...</em></p>
+}
+
+@code {
+    #region Fields
+    // Выбранный пользователь
+    private User SelectedUser = new();
+
+    // Пользователи
+    private PaginatedResult<UserDto> data = new();
+
+    // Фильтр - выбранная роль пользователя
+    private int SelectedUserRoleIndex = -1;
+
+    // Валидационные ошибки
+    private string _loginError = "";
+    private string _roleError = "";
+    private string _passwordError = "";
+    #endregion Fields
+
+    #region Commands
+    /// <summary>
+    /// Инициализирует компонент и получает список пользователей при загрузке страницы.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        // Получение списка
+        await GetUsers();
+    }
+
+    #region Management
+    /// <summary>
+    /// Удаляет пользователя из базы данных и обновляет список.
+    /// </summary>
+    /// <param name="user">Пользователь для удаления.</param>
+    private async Task DeleteUser(UserDto user)
+    {
+        // Удаление пользователя в базе данных
+        await UserData.DeleteUser(user.Id);
+        // Обновление списка
+        await GetUsers();
+    }
+
+    /// <summary>
+    /// Обновляет пользователя в базе данных и обновляет список.
+    /// </summary>
+    private async Task UpdateUser()
+    {
+        // Обновление пользователя в базе данных
+        await UserData.UpdateUser(new UserDto{ Id = SelectedUser.Id, Login = SelectedUser.Login, Role = SelectedUser.Role });
+        // Обновление списка
+        await GetUsers();
+    }
+
+    /// <summary>
+    /// Создает нового пользователя в базе данных и обновляет список.
+    /// </summary>
+    private async Task CreateUser()
+    {
+        _loginError = _roleError = _passwordError = "";
+
+        try
+        {
+            // Создание пользователя в базе данных
+            var a = await UserData.CreateUser(SelectedUser);
+        }
+        catch (ValidationApiException ex)
+        {
+            // Список ошибок
+            var errors = ex.Content is not null ? ex.Content.Errors : new();
+
+            // Распределение ошибок по свойствам
+            foreach (var item in errors.Keys)
+            {
+                switch (item)
+                {
+                    case "Login":
+                        _loginError = errors[item].First();
+                        break;
+                    case "Role":
+                        _roleError = errors[item].First();                                    
+                        break;
+                    case "Password":
+                        _passwordError = errors[item].First();
+                        break;  
+                    default:
+                        await JsRuntime.InvokeVoidAsync("alert", ex);
+                        break;
+                }
+            }
+        }
+        catch (Exception ex) { await JsRuntime.InvokeVoidAsync("alert", ex); }
+
+        // Обновление списка
+        await GetUsers();
+    }
+    #endregion Management
+
+    #region Pagination
+    /// <summary>
+    /// Получает список пользователей.
+    /// </summary>
+    private async Task<PaginatedResult<UserDto>> GetUsers() => data = await UserData.GetUsers(SelectedUserRoleIndex, 1, 5);
+
+    /// <summary>
+    /// Загружает предыдущую страницу результатов списка пользователей.
+    /// </summary>
+    private async Task Previous() => data = data.Pagination?.CurrentPage > 1 ? await UserData.GetUsers(SelectedUserRoleIndex, --data.Pagination.CurrentPage, 5) : data;
+
+    /// <summary>
+    /// Загружает следующую страницу результатов списка пользователей.
+    /// </summary>
+    private async Task Next() => data = data.Pagination?.CurrentPage < data.Pagination?.TotalPages ? await UserData.GetUsers(SelectedUserRoleIndex, ++data.Pagination.CurrentPage, 5) : data;
+
+    /// <summary>
+    /// Загружает указанную страницу результатов списка пользователей.
+    /// </summary>
+    private async Task ChangePage(int numPage) => data = await UserData.GetUsers(SelectedUserRoleIndex, numPage, 5);
+    #endregion Pagination
+
+    /// <summary>
+    /// Выбирает пользователя для редактирования.
+    /// </summary>
+    /// <param name="user">Выбранный пользователь.</param>
+    private void Selected(User user)
+    {
+        SelectedUser = new User
+        {
+            Id = user.Id,
+            Login = user.Login,
+            Password = user.Password,
+            Role = user.Role
+        };
+    }
+    #endregion Commands
+}
